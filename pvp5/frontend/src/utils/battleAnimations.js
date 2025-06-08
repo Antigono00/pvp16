@@ -1,4 +1,4 @@
-// src/utils/battleAnimations.js - Enhanced Animation System with All Effects
+// src/utils/battleAnimations.js - Enhanced Animation System with All Effects - FIXED
 import { createRoot } from 'react-dom/client';
 
 // Animation constants for timing - DOUBLED DAMAGE NUMBER DURATION
@@ -1089,7 +1089,7 @@ export const animateStatusEffect = (
     // Create effect name
     const effectName = document.createElement('div');
     effectName.className = 'status-effect-name';
-    effectName.textContent = effect.name;
+    effectName.textContent = effect.name || effect;
     effectContainer.appendChild(effectName);
     
     document.body.appendChild(effectContainer);
@@ -1208,6 +1208,7 @@ export const animateEnergyRegen = (
 
 /**
  * Shows synergy activation effect
+ * FIXED: Handle missing color property
  */
 export const animateSynergyActivation = (synergies) => {
   if (!synergies || synergies.length === 0) return;
@@ -1230,8 +1231,17 @@ export const animateSynergyActivation = (synergies) => {
         // Add synergy particles
         generateParticles(burst, 'synergy', 20);
         
-        // Flash screen with synergy color
-        const flashColor = synergy.type === 'species' ? 'rgba(76, 175, 80, 0.2)' : 'rgba(33, 150, 243, 0.2)';
+        // Flash screen with synergy color - FIXED: Default color if missing
+        const defaultColors = {
+          'species': 'rgba(76, 175, 80, 0.2)',
+          'legendary_presence': 'rgba(255, 215, 0, 0.2)',
+          'stat_synergy': 'rgba(33, 150, 243, 0.2)',
+          'form_protection': 'rgba(156, 39, 176, 0.2)',
+          'balanced_team': 'rgba(0, 188, 212, 0.2)',
+          'full_field': 'rgba(255, 87, 34, 0.2)'
+        };
+        
+        const flashColor = synergy.color || defaultColors[synergy.type] || 'rgba(33, 150, 243, 0.2)';
         screenFlash(flashColor, 400, 0.3);
         
         // Remove burst after animation
