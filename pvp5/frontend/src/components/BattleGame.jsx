@@ -1,4 +1,4 @@
-// src/components/BattleGame.jsx - ENHANCED VERSION WITH TEAM SELECTION
+// src/components/BattleGame.jsx - ENHANCED VERSION WITH TEAM SELECTION - FIXED
 import React, { useState, useEffect, useContext, useCallback, useReducer, useRef } from 'react';
 import { GameContext } from '../context/GameContext';
 import { useRadixConnect } from '../context/RadixConnectContext';
@@ -121,6 +121,9 @@ const ACTIONS = {
   UPDATE_ENERGY_MOMENTUM: 'UPDATE_ENERGY_MOMENTUM',
   SHOW_AI_STRATEGY: 'SHOW_AI_STRATEGY',
   UPDATE_CHARGE_EFFECTS: 'UPDATE_CHARGE_EFFECTS',
+  
+  // FIXED: Add new action for updating all creatures
+  UPDATE_ALL_CREATURES: 'UPDATE_ALL_CREATURES',
 };
 
 // FIXED: Calculate energy cost for a creature
@@ -269,6 +272,14 @@ const battleReducer = (state, action) => {
           )
         };
       }
+    
+    // FIXED: New action to update all creatures at once
+    case ACTIONS.UPDATE_ALL_CREATURES:
+      return {
+        ...state,
+        playerField: action.playerField || state.playerField,
+        enemyField: action.enemyField || state.enemyField
+      };
     
     case ACTIONS.ATTACK:
       const { attackResult } = action;
@@ -933,28 +944,43 @@ const battleReducer = (state, action) => {
       return updatedState;
     
     case ACTIONS.EXECUTE_AI_ACTION_SEQUENCE:
-      let newState = { ...state };
+      // FIXED: Process all actions at once, then return updated state
+      let sequenceState = { ...state };
+      const updatedCreatures = {
+        player: new Map(state.playerField.map(c => [c.id, { ...c }])),
+        enemy: new Map(state.enemyField.map(c => [c.id, { ...c }]))
+      };
       
       for (const aiAction of action.actionSequence) {
         const actionCost = aiAction.energyCost || 0;
-        if (newState.enemyEnergy < actionCost) {
+        if (sequenceState.enemyEnergy < actionCost) {
           console.log(`Skipping AI action ${aiAction.type} - not enough energy`);
           continue;
         }
         
         switch (aiAction.type) {
           case 'deploy':
-            if (newState.enemyField.some(c => c.id === aiAction.creature.id)) {
+            if (sequenceState.enemyField.some(c => c.id === aiAction.creature.id)) {
               console.log("Skipping duplicate deployment");
               continue;
             }
-            newState.enemyHand = newState.enemyHand.filter(c => c.id !== aiAction.creature.id);
-            newState.enemyField = [...newState.enemyField, aiAction.creature];
-            newState.enemyEnergy = Math.max(0, newState.enemyEnergy - aiAction.energyCost);
+            sequenceState.enemyHand = sequenceState.enemyHand.filter(c => c.id !== aiAction.creature.id);
+            sequenceState.enemyField = [...sequenceState.enemyField, aiAction.creature];
+            sequenceState.enemyEnergy = Math.max(0, sequenceState.enemyEnergy - aiAction.energyCost);
             break;
             
           case 'attack':
-            const attackResult = processAttack(aiAction.attacker, aiAction.target);
+            // FIXED: Get the latest version of attacker and target from our map
+            const latestAttacker = updatedCreatures.enemy.get(aiAction.attacker.id) || aiAction.attacker;
+            const latestTarget = updatedCreatures.player.get(aiAction.target.id) || aiAction.target;
+            
+            // Skip if target is already dead
+            if (latestTarget.currentHealth <= 0) {
+              console.log(`Skipping attack on already defeated ${latestTarget.species_name}`);
+              continue;
+            }
+            
+            const attackResult = processAttack(latestAttacker, latestTarget);
             
             // Extract damage from attackResult with multiple fallbacks
             let actualDamage = attackResult.damage ?? 
@@ -964,8 +990,8 @@ const battleReducer = (state, action) => {
                                 null;
             
             // If no damage property found, calculate it from health difference
-            if (actualDamage === null && attackResult.updatedDefender && aiAction.target) {
-              const healthBefore = aiAction.target.currentHealth || 0;
+            if (actualDamage === null && attackResult.updatedDefender && latestTarget) {
+              const healthBefore = latestTarget.currentHealth || 0;
               const healthAfter = attackResult.updatedDefender.currentHealth || 0;
               actualDamage = Math.max(0, healthBefore - healthAfter);
               console.log('EXECUTE_AI_ACTION_SEQUENCE: Calculated damage from health difference:', healthBefore, '-', healthAfter, '=', actualDamage);
@@ -978,18 +1004,14 @@ const battleReducer = (state, action) => {
             
             console.log('EXECUTE_AI_ACTION_SEQUENCE: Attack damage extracted:', actualDamage);
             
-            newState.enemyEnergy = Math.max(0, newState.enemyEnergy - aiAction.energyCost);
+            sequenceState.enemyEnergy = Math.max(0, sequenceState.enemyEnergy - aiAction.energyCost);
             
-            newState.playerField = newState.playerField.map(c => 
-              c.id === attackResult.updatedDefender.id ? attackResult.updatedDefender : c
-            ).filter(c => c.currentHealth > 0);
-            
-            newState.enemyField = newState.enemyField.map(c => 
-              c.id === attackResult.updatedAttacker.id ? attackResult.updatedAttacker : c
-            );
+            // FIXED: Update the creature maps with the results
+            updatedCreatures.enemy.set(attackResult.updatedAttacker.id, attackResult.updatedAttacker);
+            updatedCreatures.player.set(attackResult.updatedDefender.id, attackResult.updatedDefender);
             
             // Track for animations with correct damage
-            newState.lastAttack = {
+            sequenceState.lastAttack = {
               attackerId: aiAction.attacker.id,
               targetId: aiAction.target.id,
               damage: actualDamage,
@@ -1000,22 +1022,26 @@ const battleReducer = (state, action) => {
             break;
             
           case 'defend':
-            const updatedDefender = defendCreature(aiAction.creature);
-            newState.enemyEnergy = Math.max(0, newState.enemyEnergy - aiAction.energyCost);
+            const latestDefender = updatedCreatures.enemy.get(aiAction.creature.id) || aiAction.creature;
+            const updatedDefender = defendCreature(latestDefender);
+            sequenceState.enemyEnergy = Math.max(0, sequenceState.enemyEnergy - aiAction.energyCost);
             
-            newState.enemyField = newState.enemyField.map(c => 
-              c.id === updatedDefender.id ? updatedDefender : c
-            );
+            // Update the creature map
+            updatedCreatures.enemy.set(updatedDefender.id, updatedDefender);
             
             // Track for animations
-            newState.lastDefend = {
+            sequenceState.lastDefend = {
               defenderId: aiAction.creature.id
             };
             break;
         }
       }
       
-      return newState;
+      // FIXED: Apply all creature updates at once
+      sequenceState.playerField = Array.from(updatedCreatures.player.values()).filter(c => c.currentHealth > 0);
+      sequenceState.enemyField = Array.from(updatedCreatures.enemy.values()).filter(c => c.currentHealth > 0);
+      
+      return sequenceState;
     
     case ACTIONS.COMBO_BONUS:
       const comboLevel = action.player === 'player' 
@@ -1964,11 +1990,14 @@ const BattleGame = ({ onClose }) => {
   }, []);
   
   // BATTLE MECHANICS
+  // FIXED: Energy regeneration with proper bonus calculation
   const regenerateEnergy = useCallback(() => {
     let playerTotalEnergy = 0;
     playerField.forEach(creature => {
       if (creature.stats && creature.stats.energy) {
         playerTotalEnergy += creature.stats.energy;
+      } else {
+        console.log(`Creature ${creature.species_name} missing energy stat:`, creature.stats);
       }
     });
     const playerBonus = Math.floor(playerTotalEnergy / 10);
@@ -1987,7 +2016,7 @@ const BattleGame = ({ onClose }) => {
     const playerRegen = BASE_ENERGY_REGEN + playerBonus;
     const enemyRegen = BASE_ENERGY_REGEN + enemyBonus + enemyDifficultyBonus;
     
-    console.log(`Energy Regen - Player: +${playerRegen} (${playerTotalEnergy} total energy), Enemy: +${enemyRegen} (${enemyTotalEnergy} total energy)`);
+    console.log(`Energy Regen - Player: +${playerRegen} (${playerTotalEnergy} total energy from creatures), Enemy: +${enemyRegen} (${enemyTotalEnergy} total energy from creatures)`);
     
     dispatch({ type: ACTIONS.REGENERATE_ENERGY, playerRegen, enemyRegen });
     
@@ -2408,21 +2437,25 @@ const BattleGame = ({ onClose }) => {
       finishEnemyTurn();
     }, 10000); // 10 second safety timeout
     
+    // FIXED: Get the latest state for AI decisions
+    const currentPlayerField = [...playerField];
+    const currentEnemyField = [...enemyField];
+    
     // Create gameState object for enhanced AI
     const gameState = {
       turn: turn,
-      playerFieldCount: playerField.length,
-      enemyFieldCount: enemyField.length,
+      playerFieldCount: currentPlayerField.length,
+      enemyFieldCount: currentEnemyField.length,
       playerHandCount: playerHand.length,
       enemyHandCount: enemyHand.length,
-      playerTotalHealth: playerField.reduce((sum, c) => sum + c.currentHealth, 0),
-      enemyTotalHealth: enemyField.reduce((sum, c) => sum + c.currentHealth, 0),
+      playerTotalHealth: currentPlayerField.reduce((sum, c) => sum + c.currentHealth, 0),
+      enemyTotalHealth: currentEnemyField.reduce((sum, c) => sum + c.currentHealth, 0),
       consecutiveActions: consecutiveActions,
       energyMomentum: energyMomentum
     };
     
     // Determine strategy before showing thinking
-    const strategy = determineAIStrategy(difficulty, enemyHand, enemyField, playerField, enemyTools, enemySpells, currentEnergy, gameState);
+    const strategy = determineAIStrategy(difficulty, enemyHand, currentEnemyField, currentPlayerField, enemyTools, enemySpells, currentEnergy, gameState);
     
     // Show strategy hint
     if (strategy && strategy.name) {
@@ -2436,7 +2469,7 @@ const BattleGame = ({ onClose }) => {
           strategyMessage = "The enemy takes an aggressive stance!";
           stanceAnimation = 'aggressive-stance';
           // Add red aura to enemy creatures
-          enemyField.forEach(creature => {
+          currentEnemyField.forEach(creature => {
             const element = document.querySelector(`.battlefield-enemy .creature-card[data-id="${creature.id}"]`);
             if (element) {
               element.classList.add('aggressive-stance');
@@ -2449,7 +2482,7 @@ const BattleGame = ({ onClose }) => {
           strategyMessage = "The enemy assumes a defensive posture...";
           stanceAnimation = 'defensive-stance';
           // Add blue aura to enemy creatures
-          enemyField.forEach(creature => {
+          currentEnemyField.forEach(creature => {
             const element = document.querySelector(`.battlefield-enemy .creature-card[data-id="${creature.id}"]`);
             if (element) {
               element.classList.add('defensive-stance');
@@ -2483,8 +2516,8 @@ const BattleGame = ({ onClose }) => {
     }
     
     // First, queue AI thinking animation if there's an active enemy
-    if (enemyField.length > 0) {
-      const activeEnemy = enemyField[0]; // Choose first enemy for thinking animation
+    if (currentEnemyField.length > 0) {
+      const activeEnemy = currentEnemyField[0]; // Choose first enemy for thinking animation
       
       queueAnimation({
         type: 'ai-thinking',
@@ -2519,15 +2552,19 @@ const BattleGame = ({ onClose }) => {
   const executeAIActionWithAnimation = useCallback(() => {
     const currentEnergy = currentEnemyEnergyRef.current;
     
+    // FIXED: Get the latest field states
+    const currentPlayerField = [...playerField];
+    const currentEnemyField = [...enemyField];
+    
     // Create gameState object for enhanced AI
     const gameState = {
       turn: turn,
-      playerFieldCount: playerField.length,
-      enemyFieldCount: enemyField.length,
+      playerFieldCount: currentPlayerField.length,
+      enemyFieldCount: currentEnemyField.length,
       playerHandCount: playerHand.length,
       enemyHandCount: enemyHand.length,
-      playerTotalHealth: playerField.reduce((sum, c) => sum + c.currentHealth, 0),
-      enemyTotalHealth: enemyField.reduce((sum, c) => sum + c.currentHealth, 0),
+      playerTotalHealth: currentPlayerField.reduce((sum, c) => sum + c.currentHealth, 0),
+      enemyTotalHealth: currentEnemyField.reduce((sum, c) => sum + c.currentHealth, 0),
       consecutiveActions: consecutiveActions,
       energyMomentum: energyMomentum
     };
@@ -2535,8 +2572,8 @@ const BattleGame = ({ onClose }) => {
     const aiAction = determineAIAction(
       difficulty,
       enemyHand,
-      enemyField,
-      playerField,
+      currentEnemyField,
+      currentPlayerField,
       enemyTools,
       enemySpells,
       currentEnergy,
