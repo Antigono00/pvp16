@@ -1,4 +1,4 @@
-// src/utils/battleCalculations.js - FIXED WITH PROPER ENERGY COST SCALING
+// src/utils/battleCalculations.js - FIXED WITH PROPER ENERGY COST SCALING AND WHOLE NUMBERS
 // ENHANCED: Calculate derived stats with synergies and soft caps
 export const calculateDerivedStats = (creature, activeSynergies = []) => {
   // Validate input
@@ -68,16 +68,16 @@ export const calculateDerivedStats = (creature, activeSynergies = []) => {
   console.log(`  - Energy stat: ${energy}`);
   console.log(`  - Deployment cost: ${deploymentCost} (should be 5 + ${formLevel})`);
   
-  // FIXED: Apply soft caps using the proper function
+  // FIXED: Apply soft caps using the proper function and ROUND ALL VALUES
   const result = {
-    physicalAttack: applySoftCap(rawPhysicalAttack, 60, 120),
-    magicalAttack: applySoftCap(rawMagicalAttack, 60, 120),
-    physicalDefense: applySoftCap(rawPhysicalDefense, 40, 80),
-    magicalDefense: applySoftCap(rawMagicalDefense, 40, 80),
-    maxHealth: applySoftCap(rawMaxHealth, 200, 400),
-    initiative: applySoftCap(rawInitiative, 40, 60),
-    criticalChance: Math.min(5 + (speed * 0.6 * specialtyMultipliers.speed) + (magic * 0.2), 30),
-    dodgeChance: Math.min(3 + (speed * 0.4 * specialtyMultipliers.speed) + (stamina * 0.1), 20),
+    physicalAttack: Math.round(applySoftCap(rawPhysicalAttack, 60, 120)),
+    magicalAttack: Math.round(applySoftCap(rawMagicalAttack, 60, 120)),
+    physicalDefense: Math.round(applySoftCap(rawPhysicalDefense, 40, 80)),
+    magicalDefense: Math.round(applySoftCap(rawMagicalDefense, 40, 80)),
+    maxHealth: Math.round(applySoftCap(rawMaxHealth, 200, 400)),
+    initiative: Math.round(applySoftCap(rawInitiative, 40, 60)),
+    criticalChance: Math.round(Math.min(5 + (speed * 0.6 * specialtyMultipliers.speed) + (magic * 0.2), 30)),
+    dodgeChance: Math.round(Math.min(3 + (speed * 0.4 * specialtyMultipliers.speed) + (stamina * 0.1), 20)),
     energyCost: deploymentCost // This should be 5, 6, 7, or 8 only!
   };
   
@@ -508,7 +508,7 @@ export const applySoftCap = (value, softCap, hardCap) => {
   // Use a logarithmic curve for smooth diminishing returns
   const scaledExcess = remainingCap * (1 - Math.exp(-excess / remainingCap));
   
-  return Math.round(softCap + scaledExcess);
+  return softCap + scaledExcess;
 };
 
 // NEW: Calculate effective stats after all modifiers
@@ -528,12 +528,12 @@ export const calculateEffectiveStats = (creature, activeEffects = []) => {
     }
   });
   
-  // Apply soft caps to prevent extreme values
-  effectiveStats.physicalAttack = applySoftCap(effectiveStats.physicalAttack, 80, 150);
-  effectiveStats.magicalAttack = applySoftCap(effectiveStats.magicalAttack, 80, 150);
-  effectiveStats.physicalDefense = applySoftCap(effectiveStats.physicalDefense, 60, 100);
-  effectiveStats.magicalDefense = applySoftCap(effectiveStats.magicalDefense, 60, 100);
-  effectiveStats.maxHealth = applySoftCap(effectiveStats.maxHealth, 250, 500);
+  // Apply soft caps to prevent extreme values and ROUND
+  effectiveStats.physicalAttack = Math.round(applySoftCap(effectiveStats.physicalAttack, 80, 150));
+  effectiveStats.magicalAttack = Math.round(applySoftCap(effectiveStats.magicalAttack, 80, 150));
+  effectiveStats.physicalDefense = Math.round(applySoftCap(effectiveStats.physicalDefense, 60, 100));
+  effectiveStats.magicalDefense = Math.round(applySoftCap(effectiveStats.magicalDefense, 60, 100));
+  effectiveStats.maxHealth = Math.round(applySoftCap(effectiveStats.maxHealth, 250, 500));
   
   return effectiveStats;
 };
@@ -625,8 +625,8 @@ export const calculateEnergyEfficiency = (action, creature, energyCost) => {
       potentialValue = 10;
   }
   
-  // Return efficiency ratio (higher is better)
-  return energyCost > 0 ? (potentialValue / energyCost).toFixed(1) : 0;
+  // Return efficiency ratio (higher is better) - ROUND to 1 decimal
+  return energyCost > 0 ? Math.round((potentialValue / energyCost) * 10) / 10 : 0;
 };
 
 // NEW: Calculate combo damage bonus based on consecutive attacks
